@@ -4,8 +4,8 @@ import schedule, time, datetime
 import json, copy
 from data.import_data import DB_ops
 
-## portfolio backtest
-# run backtest individually for a while
+## portfolio simulation
+# run simulation individually for a while
 class portfolio_trade(auto_trade):
     def __init__(self, portfolio_size=3, capital= 100000, fee= 0.002, auto_trade=False):
         super().__init__('lenet')
@@ -34,8 +34,7 @@ class portfolio_trade(auto_trade):
             fname = 'auto_trade_record.json'
             mydb_ops = DB_ops(host='localhost', user='root', password='mlu123456')
             mydb_ops.update_today_price('HK_stocks_daily')
-            # code_info = pd.read_csv('./data/code_info.csv',converters={'code': str})
-            # code_info.set_index('code',inplace=True)
+            trd_ctx = OpenHKTradeContext(host='127.0.0.1', port=11111, security_firm=SecurityFirm.FUTUSECURITIES)
         else:
             fname = f'simulate_trade_record_{since}.json'
             self.create_record_file(fname)
@@ -54,18 +53,15 @@ class portfolio_trade(auto_trade):
             cash = trade_record['portfolio_cash'][-1]
             take_out_profit = trade_record['take_out_profit'][-1]
             
-            # Rank candidate stocks not in the portfolio  -- rank the pool by signal for the current date
+            # Rank candidate stocks based on signal values 
             signal_df = self.single_day_predict(str(date), self.code_list)
             cur_close = signal_df.close
-            
             if len(signal_df) == 0:
                 date += datetime.timedelta(days=1)
                 continue
             candidate_assets= signal_df[~signal_df.index.isin(portfolio_assets)]
             #''' Candidates Showing Buy Signal'''
-          #  tmp = candidate_assets[(candidate_assets.pred>1)&  &candidate_assets.up_turn
-          #  candidate_assets.down_deep&candidate_assets.price_up&candidate_assets.up_trend].sort_values(by=['pred'], ascending=False)  
-            tmp = candidate_assets[(candidate_assets.pred>0.5)&(candidate_assets.down_deep)].sort_values(by=['pred'], ascending=False)#
+            tmp = candidate_assets[(candidate_assets.pred>0.5)&(candidate_assets.down_deep)].sort_values(by=['pred'], ascending=False)
             candidate_assets = tmp.index.to_list()   
             num_candidates = len(candidate_assets)
            
@@ -73,37 +69,23 @@ class portfolio_trade(auto_trade):
             if portfolio_assets == []:
                 available_quota = self.portfolio_size
             else:
-                available_quota = self.portfolio_size - len(portfolio_assets)   #0: only sell x buy x;  
+                available_quota = self.portfolio_size - len(portfolio_assets)   
                 sell_assets = [asset for asset in portfolio_assets if (signal_df.loc[asset]['close']< 0.98*last_record[asset]['buy_price'])|(signal_df.loc[asset]['pred']<0.5)]
                 cut_assets = [asset for asset in portfolio_assets if (signal_df.loc[asset]['close']< 0.98*last_record[asset]['buy_price'])]
                 total_ts_count += len(sell_assets)
                 cut_count += len(cut_assets)
-
-                    
-                #assets_df = signal_df.loc[portfolio_assets]
-                #''' SELL Condition    cur_close[asset]-last_record[asset]['buy_price']
-                #sell_assets = assets_df[assets_df.pred<0].index.to_list()    # trigger sell signal
-                print('sell_assets:', sell_assets)
+                print('assets to sell:', sell_assets)
                 if len(sell_assets) > 0:  # SELL
-                    if self.auto_trade:
-                        trd_ctx = OpenHKTradeContext(host='127.0.0.1', port=11111, security_firm=SecurityFirm.FUTUSECURITIES)
-                        for asset in sell_assets:
+                    for asset in sell_assets:
+                        success_sell = True
+                        if self.auto_trade:
                             ret, data = trd_ctx.place_order(price=cur_close[asset], qty=last_record[asset]['position'], code="HK.0"+ asset, trd_side=TrdSide.SELL, trd_env=TrdEnv.SIMULATE)
-                            if ret == RET_OK:
-                                print('SELL order id:', data['order_id'][0])
-                                portfolio_assets.remove(asset)
-                                new_daily_portfolio.pop(asset)
-                                available_quota += 1
-                                cash += last_record[asset]['position']*cur_close[asset]
-                                half_profit = 0.5*(cur_close[asset]-last_record[asset]['buy_price'])*last_record[asset]['position']
-                                if half_profit > 0:
-                                    take_out_profit += half_profit
-                                    cash -= half_profit
+                            if ret != RET_OK:
+                                success_sell = False
+                                print('Place SELL order error:', data)                               
                             else:
-                                print('place_SELL_order error:', data)
-                        trd_ctx.close()
-                    else:
-                        for asset in sell_assets:
+                                print('Sell asset:', asset, 'SELL order id:', data['order_id'][0])
+                        if success_sell:
                             portfolio_assets.remove(asset)
                             new_daily_portfolio.pop(asset)
                             available_quota += 1
@@ -111,80 +93,60 @@ class portfolio_trade(auto_trade):
                             half_profit = 0.5*(cur_close[asset]-last_record[asset]['buy_price'])*last_record[asset]['position']
                             if half_profit > 0:
                                 take_out_profit += half_profit
-                                cash -= half_profit
-
+                                cash -= half_profit     
+                            print('sell asset:', asset, 'position:', last_record[asset]['position'])    
+               
             ## BUY
             if (num_candidates > 0) &(available_quota > 0) &(cash > 0):   ## BUY 'buy_quota' num of candidate assets using all the available amount
                 buy_quota = min(available_quota, num_candidates)
                 buy_assets = candidate_assets[:buy_quota]
-                
-                if self.auto_trade:
-                    trd_ctx = OpenHKTradeContext(host='127.0.0.1', port=11111, security_firm=SecurityFirm.FUTUSECURITIES)
-                    for asset in buy_assets:  # add in new assets
-                        lot_size = code_info.loc[asset]['lot_size']
-                        tmp = cash/available_quota
-                        position = int(tmp*(1-self.fee)/cur_close[asset]/lot_size)*lot_size
-                        
+                for asset in buy_assets:  # add in new assets
+                    lot_size = code_info.loc[asset]['lot_size']
+                    cash_buy_asset = cash/available_quota
+                    position = int(cash_buy_asset*(1-self.fee)/cur_close[asset]/lot_size)*lot_size
+                    if position == 0:
+                        position = int(cash*(1-self.fee)/cur_close[asset]/lot_size)*lot_size
+                        cash_buy_asset = cash
                         if position == 0:
-                            position = int(cash*(1-self.fee)/cur_close[asset]/lot_size)*lot_size
-                            tmp = cash
-                            if position == 0:
-                                print('cash is not enough to buy 1 lot')
-                                break
-                        if position > 0:
+                            print('cash is not enough to buy 1 lot')
+                            break
+                    if position > 0:    
+                        success_buy = True
+                        if self.auto_trade:
                             ret, data = trd_ctx.place_order(price= cur_close[asset], qty= position, code="HK.0"+ asset, trd_side=TrdSide.BUY, trd_env=TrdEnv.SIMULATE)
-                            if ret == RET_OK:
-                                print("Buy asset:", asset, 'BUY order id:', data['order_id'][0])
-                                new_daily_portfolio[asset] = {}
-                                new_daily_portfolio[asset]['buy_price'] = cur_close[asset]
-                                new_daily_portfolio[asset]['position'] = position
-                                new_daily_portfolio[asset]['capital'] = cur_close[asset]*position
-                                new_daily_portfolio[asset]['status'] = 'buy'
-                                portfolio_assets.append(asset)
-                                cash -= cur_close[asset]*position + self.fee*tmp   
+                            if ret != RET_OK:
+                                success_buy = False
+                                print('Place BUY oder error:', data)
                             else:
-                                print('place BUY oder error:', data)
-                        available_quota -= 1
-                    trd_ctx.close()
-                else:
-                    for asset in buy_assets:
-                        lot_size = code_info.loc[asset]['lot_size']
-                        tmp = cash/available_quota  #tmp = cash/buy_quota
-                        position = int(tmp*(1-self.fee)/cur_close[asset]/lot_size)*lot_size
-                        if position == 0:
-                            position = int(cash*(1-self.fee)/cur_close[asset]/lot_size)*lot_size
-                            tmp = cash
-                            if position == 0:
-                                print('cash is not enough to buy 1 lot')
-                                break
-                        if position > 0:
+                                print("Buy asset:", asset, 'BUY order id:', data['order_id'][0])
+                        if success_buy:
                             new_daily_portfolio[asset] = {}
                             new_daily_portfolio[asset]['buy_price'] = cur_close[asset]
-                            new_daily_portfolio[asset]['position'] = int(position)
+                            new_daily_portfolio[asset]['position'] = position*1.0
                             new_daily_portfolio[asset]['capital'] = cur_close[asset]*position
                             new_daily_portfolio[asset]['status'] = 'buy'
                             portfolio_assets.append(asset)
-                            cash -= cur_close[asset]*position + self.fee*tmp      
-                        available_quota -= 1
-                        print("buy asset:", asset, "position:", position)
-
+                            cash -= cur_close[asset]*position + self.fee*cash_buy_asset   
+                            print("buy asset:", asset, "position:", position)                
+                    available_quota -= 1
+                    
+            # current portfolio
             print('date:', str(date), 'candidate_assets:', candidate_assets, 'current portfolio:', portfolio_assets)
 
             ## Update record of hold assets
-            portfolio_total_capital = 0
+            portfolio_asset_capital = 0
             for asset in portfolio_assets:
                 if asset in last_record.keys():  
                     new_daily_portfolio[asset]['capital'] = last_record[asset]['position']* cur_close[asset]
                     new_daily_portfolio[asset]['status'] = 'hold'
-                portfolio_total_capital += new_daily_portfolio[asset]['capital']
+                portfolio_asset_capital += new_daily_portfolio[asset]['capital']
             
             ## Append to record   
             trade_record['date'].append(date.strftime('%Y-%m-%d'))
             trade_record['daily_portfolio'].append(new_daily_portfolio)
-            trade_record['portfolio_total_capital'].append(portfolio_total_capital+ cash+ take_out_profit)  
+            trade_record['portfolio_total_capital'].append(portfolio_asset_capital+ cash+ take_out_profit)  
             trade_record['portfolio_cash'].append(cash)
             trade_record['take_out_profit'].append(take_out_profit)
-           
             with open(fname, 'w') as f:
                 json.dump(trade_record, f)
             date += datetime.timedelta(days=1)

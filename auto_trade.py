@@ -9,7 +9,7 @@ import datetime as dt
 import statsmodels.api as sm
 from data.import_data import DB_ops
 from futu import *
-import joblib
+
 
 
 class auto_trade():
@@ -44,7 +44,7 @@ class auto_trade():
         db_ops = DB_ops(host= self.host, user= self.user, password = self.password)
         for code in self.code_list:
             train_df = db_ops.fetch_data_batch_from_db(code, end='2021-12-31', database=self.database)
-            test_df = db_ops.fetch_data_batch_from_db(code, end='2023-01-01', database=self.database, start='2022-01-01')
+          #  test_df = db_ops.fetch_data_batch_from_db(code, end='2023-01-01', database=self.database, start='2022-01-01')
             train_df.to_csv( f'./data/HK_stocks_data/daily/train/{code}.csv', index=False)
           #  test_df.to_csv( f'./data/HK_stocks_data/daily/test/{code}.csv', index=False)
 
@@ -92,10 +92,6 @@ class auto_trade():
         
         close = bdf.close.to_numpy()
         pred = bdf.predict.to_numpy()
-        
-        # y = np.array(bdf.EMA_10)
-        # x = np.array(bdf.EMA_20)
-        # bdf['curvature'] = calculate_curvature(x, y) 
     
         price_change = [p/close[0] -1 for p in close]
         period_len = bdf.shape[0]
@@ -115,41 +111,16 @@ class auto_trade():
 
         for i in range(period_len):  
             signal = bdf.iloc[i]['predict']>0.5 #(sum(bdf.iloc[i-3:i+1]['predict']>0)>=2)
-            down_deep = (bdf.iloc[i]['EMA_60']/bdf.iloc[i]['close']>1.1)  #the down deeper, the risk lower 
-            up_trend= True
-            if i >120:
-                _, trend = sm.tsa.filters.hpfilter(bdf.iloc[i-120:i+1]['close'], 50)   #close
-                trend_50 = pd.Series(trend, name='trend')
-                up_trend = (trend_50.iloc[-1]>trend_50.iloc[-2])          
+            down_deep = (bdf.iloc[i]['EMA_60']/bdf.iloc[i]['close']>1.1)  #the down deeper, the risk lower    
             
             if  (status == 'empty') &signal&down_deep: 
                 balance *= (1-fee)
                 buy[i] = 1 
                 buy_price = bdf.iloc[i]['close']
                 new_status = 'hold'
-                
                     
             if status == 'hold':
                 balance *= close[i]/close[i-1]
-                
-            #     if (in_amt > start_in_amt*(1+0.05)) & (remain_amt>0):  # add pos
-            #         buy_amt = remain_amt
-            #         in_amt += buy_amt* (1-fee)
-            #         remain_amt -= buy_amt
-            #         start_in_amt = in_amt  
-            #         add[i] = 1      
-            #     if in_amt > max_in_amt:
-            #         max_in_amt = in_amt
-                
-            #     if (in_amt < max(max_in_amt*0.95, start_in_amt*0.98)) & (in_amt>0):  ## max_in_amt-(max_in_amt-start_in_amt)*0.05 reduce pos when price down or take profit |lose_later
-            # #    elif (in_amt > start_in_amt*1.05) &(in_amt>0):  # stop gain
-            #         sell_amt = 0.9*in_amt
-            #         in_amt -= sell_amt
-            #         remain_amt += sell_amt*(1-fee)
-            #         start_in_amt = in_amt
-            #         max_in_amt = in_amt
-            #         cut[i] = 1
-
                 if (not signal)|(bdf.iloc[i]['close']<0.98*buy_price): 
                     sell[i] = 1
                     new_status = 'empty'
@@ -225,15 +196,14 @@ class auto_trade():
                       'trade_count': trade_count
                       })
         
-        summary_df.to_csv(f"{folder}/backtest_summary_{days}.csv", index=False)
-        # calculate sharpe ratio
-        print('sharpe ratio: ', np.mean(profit_list)/np.std(profit_list))
+        summary_df.to_csv(f"backtest_summary_{days}.csv", index=False)
         return summary_df
     
 
     def single_day_predict(self, date, code_list= None, save=False):
         if code_list == None:
             code_list = self.code_list
+        
         fetched_code, close_list, pred_list, down_deep_list, start_up_break_list, recent_uptrend_start_date_list =[], [], [], [], [],[]
         today = dt.date.today()
         _ = self.load_model()
@@ -260,9 +230,8 @@ class auto_trade():
                     _, trend = sm.tsa.filters.hpfilter(df.close, 60)  
                     bdf, test_X = prepare_data(df, self.winlen, self.future, training=False)
                     preds = self.model.predict(test_X)
+                    up_trend = (bdf.iloc[-1]['EMA_60']/(bdf.iloc[-10]['EMA_60'])>1) &(bdf.iloc[-1]['EMA_60']/(bdf.iloc[-30]['EMA_60'])>1)
                     down_deep = bdf.iloc[-1]['EMA_60']/bdf.iloc[-1]['close'] >1.1   #the down deeper, the risk lower. the last EMA60 is different if calculate using different-len tables
-                    up_trend = trend.iloc[-1]> trend.iloc[-2]
-                    
                     emas = [pta.ema(df.close, day) for day in [5,10,20,30,60]]
                     mvgs = [ema.iloc[-1] for ema in emas]
                     # find the rough recent uptrend turning id
@@ -276,7 +245,7 @@ class auto_trade():
                     mvg_stables = [sum(up_trend_ema/up_trend_ema.shift(1)<=1)==0 for up_trend_ema in up_trend_emas]
                     # check if today is a upbreak of the stable mvg line
                     for mvg, mvg_stable in zip(mvgs, mvg_stables):
-                        if mvg_stable& (df.iloc[-1]['close']/mvg <1.03)&(df.iloc[-1]['close']/mvg >=1)&(df.iloc[-1]['close']>df.iloc[-2]['close'])&(df.iloc[-2]['close']/mvg <1):
+                        if up_trend& mvg_stable& (bdf.iloc[-1]['close']/mvg <1.02)&(bdf.iloc[-1]['close']/mvg >=0.98)&(preds[-1][0]>0)*(preds[-2][0]<0):
                             start_up_break = True
                             break
                     fetched_code.append(code)

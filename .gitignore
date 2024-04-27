@@ -1,1 +1,6 @@
 data/
+model/
+backtest/
+results/
+keys.py
+__pycache__/
