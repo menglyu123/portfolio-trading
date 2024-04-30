@@ -79,12 +79,28 @@ class portfolio_trade(auto_trade):
                     for asset in sell_assets:
                         success_sell = True
                         if self.auto_trade:
-                            ret, data = trd_ctx.place_order(price=cur_close[asset], qty=last_record[asset]['position'], code="HK.0"+ asset, trd_side=TrdSide.SELL, trd_env=TrdEnv.SIMULATE)
+                            ret, data = trd_ctx.place_order(price=cur_close[asset], qty=last_record[asset]['position'], code="HK.0"+ asset, trd_side=TrdSide.SELL, trd_env=TrdEnv.SIMULATE) #order_type=OrderType.MARKET for real market
                             if ret != RET_OK:
                                 success_sell = False
                                 print('Place SELL order error:', data)                               
                             else:
-                                print('Sell asset:', asset, 'SELL order id:', data['order_id'][0])
+                                while True:
+                                    time.sleep(10)
+                                    order_id = data['order_id'][0]
+                                    trd_ctx = OpenSecTradeContext(filter_trdmarket=TrdMarket.HK, host='127.0.0.1', port=11111, security_firm=SecurityFirm.FUTUSECURITIES)
+                                    ret, data = trd_ctx.history_order_list_query(trd_env=TrdEnv.SIMULATE)
+                                    tsc_rcd = data[data['order_id']==order_id]
+                                    if tsc_rcd['order_status'][0]==OrderStatus.FILLED_ALL:
+                                        break
+                                    # modify the current order
+                                    print(f'fail to sell at {tsc_rcd['price'][0]} for asset {asset}')
+                                    modify_price = tsc_rcd['price'][0]*0.999
+                                    print(f'modify to sell at {modify_price} for asset {asset}')
+                                    ret, data = trd_ctx.modify_order(ModifyOrderOp.NORMAL, order_id= order_id, qty=tsc_rcd['qty'][0], price= modify_price, trd_env=TrdEnv.SIMULATE) 
+                                    if ret != RET_OK:
+                                        print('error:', data)
+                                        success_sell = False
+                                        break
                         if success_sell:
                             portfolio_assets.remove(asset)
                             new_daily_portfolio.pop(asset)
@@ -94,7 +110,7 @@ class portfolio_trade(auto_trade):
                             if half_profit > 0:
                                 take_out_profit += half_profit
                                 cash -= half_profit     
-                            print('sell asset:', asset, 'position:', last_record[asset]['position'])    
+                            print('sell asset:', asset, 'at price:', tsc_rcd['price'][0], 'position:', last_record[asset]['position'])    
                
             ## BUY
             if (num_candidates > 0) &(available_quota > 0) &(cash > 0):   ## BUY 'buy_quota' num of candidate assets using all the available amount
@@ -113,22 +129,39 @@ class portfolio_trade(auto_trade):
                     if position > 0:    
                         success_buy = True
                         if self.auto_trade:
-                            ret, data = trd_ctx.place_order(price= cur_close[asset], qty= position, code="HK.0"+ asset, trd_side=TrdSide.BUY, trd_env=TrdEnv.SIMULATE)
+                        
+                            ret, data = trd_ctx.place_order(price= cur_close[asset], qty= position, code="HK.0"+ asset, trd_side=TrdSide.BUY, trd_env=TrdEnv.SIMULATE) #order_type=OrderType.MARKET for real market
                             if ret != RET_OK:
                                 success_buy = False
                                 print('Place BUY oder error:', data)
                             else:
-                                print("Buy asset:", asset, 'BUY order id:', data['order_id'][0])
+                                while True:
+                                    time.sleep(10) 
+                                    order_id = data['order_id'][0]
+                                    trd_ctx = OpenSecTradeContext(filter_trdmarket=TrdMarket.HK, host='127.0.0.1', port=11111, security_firm=SecurityFirm.FUTUSECURITIES)
+                                    ret, data = trd_ctx.history_order_list_query(trd_env=TrdEnv.SIMULATE)
+                                    tsc_rcd = data[data['order_id']==order_id]
+                                    if tsc_rcd['order_status'][0]==OrderStatus.FILLED_ALL:
+                                        break
+                                    # modify the current order
+                                    print(f'fail to buy at {tsc_rcd['price'][0]} for asset {asset}')
+                                    modify_price = tsc_rcd['price'][0]*1.001
+                                    print(f'modify to buy at {modify_price} for asset {asset}')
+                                    ret, data = trd_ctx.modify_order(ModifyOrderOp.NORMAL, order_id= order_id, qty=tsc_rcd['qty'][0], price= modify_price, trd_env=TrdEnv.SIMULATE) 
+                                    if ret != RET_OK:
+                                        print('error:', data)
+                                        success_buy = False
+                                        break
                         if success_buy:
                             new_daily_portfolio[asset] = {}
                             new_daily_portfolio[asset]['buy_price'] = cur_close[asset]
-                            new_daily_portfolio[asset]['position'] = position*1.0
+                            new_daily_portfolio[asset]['position'] = int(position)
                             new_daily_portfolio[asset]['capital'] = cur_close[asset]*position
                             new_daily_portfolio[asset]['status'] = 'buy'
                             portfolio_assets.append(asset)
                             cash -= cur_close[asset]*position + self.fee*cash_buy_asset   
-                            print("buy asset:", asset, "position:", position)                
-                    available_quota -= 1
+                            print("buy asset:", asset, 'at price:', tsc_rcd['price'][0], "position:", position)                
+                        available_quota -= 1
                     
             # current portfolio
             print('date:', str(date), 'candidate_assets:', candidate_assets, 'current portfolio:', portfolio_assets)
@@ -150,7 +183,7 @@ class portfolio_trade(auto_trade):
             with open(fname, 'w') as f:
                 json.dump(trade_record, f)
             date += datetime.timedelta(days=1)
-        print('trade count:', total_ts_count, 'cut count:', cut_count)
+        print('trade(sell) count:', total_ts_count, 'cut(sell) count:', cut_count)
         return
 
 
@@ -158,7 +191,7 @@ class portfolio_trade(auto_trade):
         if not self.auto_trade:
             return
         else:
-            schedule.every().day.at("15:30").do(self.trade)
+            schedule.every().day.at("10:41").do(self.trade)
             while True:
                 schedule.run_pending()
                 time.sleep(1)
