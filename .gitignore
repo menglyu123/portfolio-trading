@@ -1,4 +1,4 @@
-data/
+prepare_data.py
 model/
 backtest/
 results/

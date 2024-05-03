@@ -9,6 +9,12 @@ import datetime as dt
 import statsmodels.api as sm
 from data.import_data import DB_ops
 from futu import *
+import joblib
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import udf
+from pyspark.sql.types import StructType, StructField, DoubleType, BooleanType
+
 
 
 
@@ -211,7 +217,7 @@ class auto_trade():
 
         for code in code_list:
             if dt.datetime.strptime(date,'%Y-%m-%d').date() == today:
-                ret, df, _ = quote_ctx.request_history_kline('HK.0'+code, str(today-dt.timedelta(days=self.winlen+60+500)), str(today), ktype='K_DAY')
+                ret, df, _ = quote_ctx.request_history_kline('HK.0'+code, str(today-dt.timedelta(days=self.winlen+60+90)), str(today), ktype='K_DAY')
                 if ret !=RET_OK:
                     print('error: ', df)
                 else: 
@@ -267,6 +273,48 @@ class auto_trade():
        
 
 
+    def spark_single_day_predict(self, date, code_list=None, save=False):
+        if code_list == None:
+            code_list = self.code_list
+        date = dt.datetime.strptime(date,'%Y-%m-%d').date()
+
+        # update today's price to db
+        db_ops = DB_ops(host= self.host, user= self.user, password = self.password)
+        if date == dt.date.today():
+            db_ops.update_today_price(interval='1d')
+        
+        spark = SparkSession.builder.appName("predict").getOrCreate()
+        sc = spark.sparkContext
+        df = spark.createDataFrame(pd.DataFrame({'code':code_list}))
+
+        price_model = joblib.load('./model/price_model.pkl')
+        broadcast_price_model = sc.broadcast(price_model)
+        
+        schema = StructType([StructField('close', DoubleType(), False), StructField('pred', DoubleType(), False), StructField('down_deep', BooleanType(), False)])
+        @udf(schema)
+        def add_past_arr(code):
+            db_ops = DB_ops(host= self.host, user= self.user, password = self.password)
+            price_df = db_ops.fetch_batch_price_from_db(code, '1d', end= str(date), limit=self.winlen+60)
+            # data transform and preprocessing
+            try:
+                bdf, test_X = prepare_data(price_df, 120, 1, training=False)
+                down_deep = bool(bdf.iloc[-1]['EMA_60']/bdf.iloc[-1]['close'] >1.1)
+                tmp = broadcast_price_model.value.predict(test_X).tolist()
+                close = float(bdf.iloc[-1]['close'])
+            except:
+                down_deep = False
+                close = -0.0
+                tmp = [[-999.0]]
+            return [close, tmp[0][0], down_deep]
+        
+        df = df.withColumn("results", add_past_arr(df['code'])).select('code','results.*').toPandas()
+        df.set_index('code', inplace=True)
+        if save & (len(df)!=0):
+            df.to_csv(f'./results/{date}_pred_all.csv')
+        return df
+
+
+
 if __name__ =='__main__':
     auto_trade_today = auto_trade('lenet')
     parser = argparse.ArgumentParser()
@@ -285,7 +333,7 @@ if __name__ =='__main__':
         auto_trade_today.backtest(days=500, record=True) #code_list=['0285']
 
     if args.realtimepredict:
-        pred= auto_trade_today.single_day_predict(str(dt.date.today()), save=True) 
+        pred= auto_trade_today.spark_single_day_predict(str(dt.date.today()), save=True) 
     
         
       

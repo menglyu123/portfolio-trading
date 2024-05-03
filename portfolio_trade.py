@@ -32,8 +32,6 @@ class portfolio_trade(auto_trade):
         if self.auto_trade:
             date = today
             fname = 'auto_trade_record.json'
-            mydb_ops = DB_ops(host='localhost', user='root', password='mlu123456')
-            mydb_ops.update_today_price('HK_stocks_daily')
             trd_ctx = OpenHKTradeContext(host='127.0.0.1', port=11111, security_firm=SecurityFirm.FUTUSECURITIES)
         else:
             fname = f'simulate_trade_record_{since}.json'
@@ -54,7 +52,7 @@ class portfolio_trade(auto_trade):
             take_out_profit = trade_record['take_out_profit'][-1]
             
             # Rank candidate stocks based on signal values 
-            signal_df = self.single_day_predict(str(date), self.code_list)
+            signal_df = self.spark_single_day_predict(str(date), self.code_list)
             cur_close = signal_df.close
             if len(signal_df) == 0:
                 date += datetime.timedelta(days=1)
@@ -91,9 +89,10 @@ class portfolio_trade(auto_trade):
                                     ret, data = trd_ctx.history_order_list_query(trd_env=TrdEnv.SIMULATE)
                                     tsc_rcd = data[data['order_id']==order_id]
                                     if tsc_rcd['order_status'][0]==OrderStatus.FILLED_ALL:
+                                        trd_ctx.close()
                                         break
                                     # modify the current order
-                                    print(f'fail to sell at {tsc_rcd['price'][0]} for asset {asset}')
+                                    print('fail to sell at', tsc_rcd['price'][0], 'for asset', asset)
                                     modify_price = tsc_rcd['price'][0]*0.999
                                     print(f'modify to sell at {modify_price} for asset {asset}')
                                     ret, data = trd_ctx.modify_order(ModifyOrderOp.NORMAL, order_id= order_id, qty=tsc_rcd['qty'][0], price= modify_price, trd_env=TrdEnv.SIMULATE) 
@@ -116,12 +115,14 @@ class portfolio_trade(auto_trade):
             if (num_candidates > 0) &(available_quota > 0) &(cash > 0):   ## BUY 'buy_quota' num of candidate assets using all the available amount
                 buy_quota = min(available_quota, num_candidates)
                 buy_assets = candidate_assets[:buy_quota]
+                print('assets to buy:', buy_assets)
                 for asset in buy_assets:  # add in new assets
                     lot_size = code_info.loc[asset]['lot_size']
                     cash_buy_asset = cash/available_quota
-                    position = int(cash_buy_asset*(1-self.fee)/cur_close[asset]/lot_size)*lot_size
+                    buy_price = cur_close[asset]
+                    position = int(cash_buy_asset*(1-self.fee)/buy_price/lot_size)*lot_size
                     if position == 0:
-                        position = int(cash*(1-self.fee)/cur_close[asset]/lot_size)*lot_size
+                        position = int(cash*(1-self.fee)/buy_price/lot_size)*lot_size
                         cash_buy_asset = cash
                         if position == 0:
                             print('cash is not enough to buy 1 lot')
@@ -129,8 +130,7 @@ class portfolio_trade(auto_trade):
                     if position > 0:    
                         success_buy = True
                         if self.auto_trade:
-                        
-                            ret, data = trd_ctx.place_order(price= cur_close[asset], qty= position, code="HK.0"+ asset, trd_side=TrdSide.BUY, trd_env=TrdEnv.SIMULATE) #order_type=OrderType.MARKET for real market
+                            ret, data = trd_ctx.place_order(price= buy_price, qty= position, code="HK.0"+ asset, trd_side=TrdSide.BUY, trd_env=TrdEnv.SIMULATE) #order_type=OrderType.MARKET for real market
                             if ret != RET_OK:
                                 success_buy = False
                                 print('Place BUY oder error:', data)
@@ -142,9 +142,11 @@ class portfolio_trade(auto_trade):
                                     ret, data = trd_ctx.history_order_list_query(trd_env=TrdEnv.SIMULATE)
                                     tsc_rcd = data[data['order_id']==order_id]
                                     if tsc_rcd['order_status'][0]==OrderStatus.FILLED_ALL:
+                                        position = tsc_rcd['dealt_qty'][0]
+                                        buy_price = tsc_rcd['dealt_avg_price'][0]
                                         break
                                     # modify the current order
-                                    print(f'fail to buy at {tsc_rcd['price'][0]} for asset {asset}')
+                                    print('fail to buy at', tsc_rcd['price'][0], 'for asset', asset)
                                     modify_price = tsc_rcd['price'][0]*1.001
                                     print(f'modify to buy at {modify_price} for asset {asset}')
                                     ret, data = trd_ctx.modify_order(ModifyOrderOp.NORMAL, order_id= order_id, qty=tsc_rcd['qty'][0], price= modify_price, trd_env=TrdEnv.SIMULATE) 
@@ -154,13 +156,13 @@ class portfolio_trade(auto_trade):
                                         break
                         if success_buy:
                             new_daily_portfolio[asset] = {}
-                            new_daily_portfolio[asset]['buy_price'] = cur_close[asset]
+                            new_daily_portfolio[asset]['buy_price'] = buy_price
                             new_daily_portfolio[asset]['position'] = int(position)
-                            new_daily_portfolio[asset]['capital'] = cur_close[asset]*position
+                            new_daily_portfolio[asset]['capital'] = buy_price*position
                             new_daily_portfolio[asset]['status'] = 'buy'
                             portfolio_assets.append(asset)
-                            cash -= cur_close[asset]*position + self.fee*cash_buy_asset   
-                            print("buy asset:", asset, 'at price:', tsc_rcd['price'][0], "position:", position)                
+                            cash -= buy_price*position + self.fee*cash_buy_asset   
+                            print("buy asset:", asset, 'at price:', buy_price, "position:", position)                
                         available_quota -= 1
                     
             # current portfolio
@@ -191,10 +193,15 @@ class portfolio_trade(auto_trade):
         if not self.auto_trade:
             return
         else:
-            schedule.every().day.at("10:41").do(self.trade)
+            schedule.every().day.at("13:50").do(self.trade)
             while True:
                 schedule.run_pending()
                 time.sleep(1)
+                # mydb = DB_ops('localhost','root','mlu123456')
+                # schedule.every().day.at("16:20").do(mydb.auto_update)
+                # while True:
+                #     schedule.run_pending()
+                #     time.sleep(1)
 
 
 

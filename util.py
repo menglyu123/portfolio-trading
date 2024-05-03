@@ -12,7 +12,6 @@ import time
 import requests
 
 
-
 def get_price_from_alpaca(symbol, start:datetime, end:datetime, interval) -> list[dict]:
     config = AlpacaConfig()
     url = config.BARS_URL + '/bars'
