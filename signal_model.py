@@ -1,4 +1,4 @@
-from util import cal_trade_performance, cal_drawdown, cal_trade_performance, plot_bdf, calculate_curvature
+from util import cal_trade_performance, cal_drawdown, cal_trade_performance, plot_bdf
 from data.prepare_data import prepare_data
 from model.mylenet import lenet_regression
 from model.myencoder import encoder_regression
@@ -18,13 +18,13 @@ from pyspark.sql.types import StructType, StructField, DoubleType, BooleanType
 
 
 
-class auto_trade():
+class Signal_Model():
     def __init__(self, model):
         with open('./data/code_pool.txt','r') as fp:
             self.code_list = [line.rstrip() for line in fp]
         self.winlen = 120
         self.future = 1
-        self.fea_num = 16#15
+        self.fea_num = 16
         self.host = 'localhost'
         self.user = 'root'
         self.password = 'mlu123456'
@@ -311,12 +311,13 @@ class auto_trade():
         df.set_index('code', inplace=True)
         if save & (len(df)!=0):
             df.to_csv(f'./results/{date}_pred_all.csv')
+        spark.stop()
         return df
 
 
 
 if __name__ =='__main__':
-    auto_trade_today = auto_trade('lenet')
+    auto_trade_today = Signal_Model('lenet')
     parser = argparse.ArgumentParser()
     parser.add_argument('--download_data', action='store_true')
     parser.add_argument('--train', action='store_true')
@@ -327,7 +328,7 @@ if __name__ =='__main__':
     if args.download_data:
         auto_trade_today.fetch_train_data()
     if args.train:
-        auto_trade_today = auto_trade('lenet')
+        auto_trade_today = Signal_Model('lenet')
         auto_trade_today.train(lr=1e-4)   
     if args.backtest:
         auto_trade_today.backtest(days=500, record=True) #code_list=['0285']

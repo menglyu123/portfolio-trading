@@ -1,12 +1,12 @@
-from auto_trade import *
+from signal_model import *
 from futu import *
 import schedule, time, datetime
 import json, copy
-from data.import_data import DB_ops
+
 
 ## portfolio simulation
 # run simulation individually for a while
-class portfolio_trade(auto_trade):
+class portfolio_trade(Signal_Model):
     def __init__(self, portfolio_size=3, capital= 100000, fee= 0.002, auto_trade=False):
         super().__init__('lenet')
         self.portfolio_size = portfolio_size
@@ -14,7 +14,8 @@ class portfolio_trade(auto_trade):
         self.fee = fee
         self.auto_trade = auto_trade
         if self.auto_trade:
-            self.create_record_file('auto_trade_record.json')
+            if not os.path.exists(os.path.join(os.getcwd(),'auto_trade_record.json')):
+                self.create_record_file('auto_trade_record.json')
 
 
     def create_record_file(self, fname):
@@ -35,7 +36,7 @@ class portfolio_trade(auto_trade):
             trd_ctx = OpenHKTradeContext(host='127.0.0.1', port=11111, security_firm=SecurityFirm.FUTUSECURITIES)
         else:
             fname = f'simulate_trade_record_{since}.json'
-            self.create_record_file(fname)
+            # self.create_record_file(fname)
             date = datetime.datetime.strptime(since, '%Y-%m-%d').date()
         
         total_ts_count = 0
@@ -52,7 +53,13 @@ class portfolio_trade(auto_trade):
             take_out_profit = trade_record['take_out_profit'][-1]
             
             # Rank candidate stocks based on signal values 
-            signal_df = self.spark_single_day_predict(str(date), self.code_list)
+            while True:
+                try:
+                    signal_df = self.spark_single_day_predict(str(date), self.code_list)
+                    break
+                except:
+                    time.sleep(60)
+                
             cur_close = signal_df.close
             if len(signal_df) == 0:
                 date += datetime.timedelta(days=1)
@@ -75,9 +82,10 @@ class portfolio_trade(auto_trade):
                 print('assets to sell:', sell_assets)
                 if len(sell_assets) > 0:  # SELL
                     for asset in sell_assets:
+                        sell_price = cur_close[asset]
                         success_sell = True
                         if self.auto_trade:
-                            ret, data = trd_ctx.place_order(price=cur_close[asset], qty=last_record[asset]['position'], code="HK.0"+ asset, trd_side=TrdSide.SELL, trd_env=TrdEnv.SIMULATE) #order_type=OrderType.MARKET for real market
+                            ret, data = trd_ctx.place_order(price=sell_price, qty=last_record[asset]['position'], code="HK.0"+ asset, trd_side=TrdSide.SELL, trd_env=TrdEnv.SIMULATE) #order_type=OrderType.MARKET for real market
                             if ret != RET_OK:
                                 success_sell = False
                                 print('Place SELL order error:', data)                               
@@ -89,7 +97,8 @@ class portfolio_trade(auto_trade):
                                     ret, data = trd_ctx.history_order_list_query(trd_env=TrdEnv.SIMULATE)
                                     tsc_rcd = data[data['order_id']==order_id]
                                     if tsc_rcd['order_status'][0]==OrderStatus.FILLED_ALL:
-                                        trd_ctx.close()
+                                        position = tsc_rcd['dealt_qty'][0]
+                                        sell_price = tsc_rcd['dealt_avg_price'][0]                                
                                         break
                                     # modify the current order
                                     print('fail to sell at', tsc_rcd['price'][0], 'for asset', asset)
@@ -104,12 +113,12 @@ class portfolio_trade(auto_trade):
                             portfolio_assets.remove(asset)
                             new_daily_portfolio.pop(asset)
                             available_quota += 1
-                            cash += last_record[asset]['position']*cur_close[asset]
-                            half_profit = 0.5*(cur_close[asset]-last_record[asset]['buy_price'])*last_record[asset]['position']
+                            cash += last_record[asset]['position']*sell_price
+                            half_profit = 0.5*(sell_price-last_record[asset]['buy_price'])*last_record[asset]['position']
                             if half_profit > 0:
                                 take_out_profit += half_profit
                                 cash -= half_profit     
-                            print('sell asset:', asset, 'at price:', tsc_rcd['price'][0], 'position:', last_record[asset]['position'])    
+                            print('sell asset:', asset, 'at price:', sell_price, 'position:', last_record[asset]['position'])    
                
             ## BUY
             if (num_candidates > 0) &(available_quota > 0) &(cash > 0):   ## BUY 'buy_quota' num of candidate assets using all the available amount
@@ -193,15 +202,15 @@ class portfolio_trade(auto_trade):
         if not self.auto_trade:
             return
         else:
-            schedule.every().day.at("13:50").do(self.trade)
+            schedule.every().day.at("15:50").do(self.trade)
             while True:
-                schedule.run_pending()
-                time.sleep(1)
-                # mydb = DB_ops('localhost','root','mlu123456')
-                # schedule.every().day.at("16:20").do(mydb.auto_update)
-                # while True:
-                #     schedule.run_pending()
-                #     time.sleep(1)
+                # schedule.run_pending()
+                # time.sleep(1)
+                mydb = DB_ops('localhost','root','mlu123456')
+                schedule.every().day.at("16:20").do(mydb.auto_update)
+                while True:
+                    schedule.run_pending()
+                    time.sleep(1)
 
 
 
@@ -213,7 +222,7 @@ if __name__ == '__main__':
 
     if args.simulate:
         myportfolio = portfolio_trade()
-        myportfolio.trade(since='2023-10-1')
+        myportfolio.trade(since='2024-4-22') #'2023-10-1'
 
     if args.auto_trade:
         myportfolio = portfolio_trade(auto_trade=True)
