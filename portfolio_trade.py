@@ -203,14 +203,11 @@ class portfolio_trade(Signal_Model):
             return
         else:
             schedule.every().day.at("15:50").do(self.trade)
+            mydb = DB_ops('localhost','root','mlu123456')
+            schedule.every().day.at("16:20").do(mydb.auto_update)
             while True:
-                # schedule.run_pending()
-                # time.sleep(1)
-                mydb = DB_ops('localhost','root','mlu123456')
-                schedule.every().day.at("16:20").do(mydb.auto_update)
-                while True:
-                    schedule.run_pending()
-                    time.sleep(1)
+                schedule.run_pending()
+                time.sleep(1)
 
 
 
