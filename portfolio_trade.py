@@ -4,8 +4,6 @@ import schedule, time, datetime
 import json, copy
 
 
-## portfolio simulation
-# run simulation individually for a while
 class portfolio_trade(Signal_Model):
     def __init__(self, portfolio_size=3, capital= 100000, fee= 0.002, auto_trade=False):
         super().__init__('lenet')
@@ -14,8 +12,8 @@ class portfolio_trade(Signal_Model):
         self.fee = fee
         self.auto_trade = auto_trade
         if self.auto_trade:
-            if not os.path.exists(os.path.join(os.getcwd(),'auto_trade_record.json')):
-                self.create_record_file('auto_trade_record.json')
+            if not os.path.exists(os.path.join(os.getcwd(),'./results/auto_trade_record.json')):
+                self.create_record_file('./results/auto_trade_record.json')
 
 
     def create_record_file(self, fname):
@@ -30,12 +28,14 @@ class portfolio_trade(Signal_Model):
         code_info = pd.read_csv('./data/code_info.csv',converters={'code': str})
         code_info.set_index('code',inplace=True)
        
+        # real time auto trade mode
         if self.auto_trade:
             date = today
-            fname = 'auto_trade_record.json'
+            fname = './results/auto_trade_record.json'
             trd_ctx = OpenHKTradeContext(host='127.0.0.1', port=11111, security_firm=SecurityFirm.FUTUSECURITIES)
+        # simulation experiment mode
         else:
-            fname = f'simulate_trade_record_{since}.json'
+            fname = f'./results/simulate_trade_record_{since}.json'
             # self.create_record_file(fname)
             date = datetime.datetime.strptime(since, '%Y-%m-%d').date()
         
@@ -52,7 +52,7 @@ class portfolio_trade(Signal_Model):
             cash = trade_record['portfolio_cash'][-1]
             take_out_profit = trade_record['take_out_profit'][-1]
             
-            # Rank candidate stocks based on signal values 
+            # Rank candidate stocks based on predicted signal values 
             while True:
                 try:
                     signal_df = self.spark_single_day_predict(str(date), self.code_list)
@@ -219,7 +219,7 @@ if __name__ == '__main__':
 
     if args.simulate:
         myportfolio = portfolio_trade()
-        myportfolio.trade(since='2024-4-22') #'2023-10-1'
+        myportfolio.trade(since='2023-10-1') 
 
     if args.auto_trade:
         myportfolio = portfolio_trade(auto_trade=True)

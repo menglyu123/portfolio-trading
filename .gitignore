@@ -1,6 +1,2 @@
-prepare_data.py
-model/
-backtest/
-results/
 keys.py
 __pycache__/

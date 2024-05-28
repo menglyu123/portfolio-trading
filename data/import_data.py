@@ -117,7 +117,6 @@ class DB_ops():
             conn.close()
       
     
-
     def update_today_price(self, interval):
         if interval == '1d':
             database = 'HK_stocks_daily'
@@ -161,7 +160,7 @@ class DB_ops():
         self.import_capital_flow(if_exists='append')
 
 
-
+    # fetch price from database in batch
     def fetch_batch_price_from_db(self, ticker, interval, start=None, end=None, limit=None):
         if interval == '1d':
             database = 'HK_stocks_daily'
@@ -188,9 +187,7 @@ class DB_ops():
         if (start == None) & (limit != None):
             rows = rows[::-1]
         self.close_mysqlconn()
-        # if rows[-1][0] != datetime.datetime.strptime(date, '%Y-%m-%d'):
-        #     return pd.DataFrame()
-        # else:
+
         if interval=='1d':
             df = pd.DataFrame(rows, columns =['date','open','high','low','close','adj_close','volume'])
         if interval == '1h':
@@ -205,8 +202,8 @@ class DB_ops():
         
 
 
-##### CREATE database #####
 if __name__ == '__main__':  
+    ## schedule daily price update
     mydb = DB_ops('localhost','root','mlu123456')
     schedule.every().day.at("16:20").do(mydb.auto_update)
     while True:

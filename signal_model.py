@@ -272,7 +272,7 @@ class Signal_Model():
         return df
        
 
-
+    # build a Spark session to parallel the prediction for a pool of 100 stocks
     def spark_single_day_predict(self, date, code_list=None, save=False):
         if code_list == None:
             code_list = self.code_list
@@ -331,7 +331,7 @@ if __name__ =='__main__':
         auto_trade_today = Signal_Model('lenet')
         auto_trade_today.train(lr=1e-4)   
     if args.backtest:
-        auto_trade_today.backtest(days=500, record=True) #code_list=['0285']
+        auto_trade_today.backtest(days=500, record=True) 
 
     if args.realtimepredict:
         pred= auto_trade_today.spark_single_day_predict(str(dt.date.today()), save=True) 
