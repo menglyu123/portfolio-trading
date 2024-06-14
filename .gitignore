@@ -1,2 +1,4 @@
 keys.py
 __pycache__/
+data/
+backtest/
