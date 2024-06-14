@@ -27,24 +27,49 @@ def download_today_capital_flow(tickers):
     quote_ctx.close() # After using the connection, remember to close it to prevent the number of connections from running out
     return data
 
-def download_price(tickers, start, end, interval):
+
+def download_price(tickers, start, end, interval='1d'):
     data = []
-    if interval == '1d':
+    quote_ctx = OpenQuoteContext(host='127.0.0.1', port=11111)
+    if start == None:
+        start = dt.date(2021,1,1)
+    if end == None:
+        end = dt.date.today()
+    if interval=='1d':
         for ticker in tickers:
-            try:
-                data.append(yf.download(ticker+'.HK', start=start, end=end, interval='1d').reset_index())
-            except Exception:
-                print(Exception)
-    if interval == '1h':
-        for ticker in tickers:
-            try:
-                df = yf.download(ticker+'.HK', start=start, end=end, interval='1h').reset_index()
-                df['Datetime'] = pd.to_datetime(df.Datetime).dt.tz_localize(None)
-            except Exception:
-                print(Exception)
-                continue
-            data.append(df)
+            ret, df, _ = quote_ctx.request_history_kline('HK.0'+ticker, str(start), str(end), ktype='K_DAY') 
+            if ret !=RET_OK:
+                print('error: ', df)
+            else: 
+                df = df[['time_key','open','high','low','close','last_close','volume']]
+                df.rename(columns={'time_key':'date'},inplace=True)
+                df['date'] = pd.to_datetime(df.date).dt.date
+                df.columns=['Date','Open','High','Low','Close','Adj Close','Volume']
+                df['Adj Close'] = df.Close
+                data.append(df)
+                time.sleep(0.5)
+        quote_ctx.close()
     return data
+            
+            
+# def download_price(tickers, start, end, interval):
+#     data = []
+#     if interval == '1d':
+#         for ticker in tickers:
+#             try:
+#                 data.append(yf.download(ticker+'.HK', start=start, end=end, interval='1d').reset_index())
+#             except Exception:
+#                 print(Exception)
+#     if interval == '1h':
+#         for ticker in tickers:
+#             try:
+#                 df = yf.download(ticker+'.HK', start=start, end=end, interval='1h').reset_index()
+#                 df['Datetime'] = pd.to_datetime(df.Datetime).dt.tz_localize(None)
+#             except Exception:
+#                 print(Exception)
+#                 continue
+#             data.append(df)
+#     return data
 
 
 
@@ -205,9 +230,12 @@ class DB_ops():
 if __name__ == '__main__':  
     ## schedule daily price update
     mydb = DB_ops('localhost','root','mlu123456')
-    schedule.every().day.at("16:20").do(mydb.auto_update)
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
+    # schedule.every().day.at("16:20").do(mydb.auto_update)
+    # while True:
+    #     schedule.run_pending()
+    #     time.sleep(1)
+    mydb.import_historical_price()
+    
+   
 
   

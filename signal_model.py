@@ -211,25 +211,15 @@ class Signal_Model():
             code_list = self.code_list
         
         fetched_code, close_list, pred_list, down_deep_list, start_up_break_list, recent_uptrend_start_date_list =[], [], [], [], [],[]
-        today = dt.date.today()
         _ = self.load_model()
         quote_ctx = OpenQuoteContext(host='127.0.0.1', port=11111)
 
         for code in code_list:
-            if dt.datetime.strptime(date,'%Y-%m-%d').date() == today:
-                ret, df, _ = quote_ctx.request_history_kline('HK.0'+code, str(today-dt.timedelta(days=self.winlen+60+90)), str(today), ktype='K_DAY')
-                if ret !=RET_OK:
-                    print('error: ', df)
-                else: 
-                    df = df[['time_key','open','high','low','close','volume']]
-                    df.rename(columns={'time_key':'date'},inplace=True)
-                    df['date'] = pd.to_datetime(df.date).dt.date
+            db_ops = DB_ops(host= self.host, user= self.user, password= self.password)
+            if date == dt.date.today():
+                db_ops.update_today_price(interval='1d')
+            df = db_ops.fetch_batch_price_from_db(code, '1d', end=date, limit=self.winlen+100)#60
                 
-                time.sleep(0.5)
-            elif dt.datetime.strptime(date,'%Y-%m-%d').date() < today:
-                db_ops = DB_ops(host= self.host, user= self.user, password= self.password)
-                df = db_ops.fetch_batch_price_from_db(code, '1d', end=date, limit=self.winlen+100)#60
-         
             if len(df)!=0:
                 start_up_break = False
                 try:
@@ -296,8 +286,8 @@ class Signal_Model():
             db_ops = DB_ops(host= self.host, user= self.user, password = self.password)
             price_df = db_ops.fetch_batch_price_from_db(code, '1d', end= str(date), limit=self.winlen+60)
             # data transform and preprocessing
-            try:
-                bdf, test_X = prepare_data(price_df, 120, 1, training=False)
+            try: 
+                bdf, test_X = prepare_data(price_df, self.winlen, self.future, training=False) 
                 down_deep = bool(bdf.iloc[-1]['EMA_60']/bdf.iloc[-1]['close'] >1.1)
                 tmp = broadcast_price_model.value.predict(test_X).tolist()
                 close = float(bdf.iloc[-1]['close'])
@@ -305,7 +295,7 @@ class Signal_Model():
                 down_deep = False
                 close = -0.0
                 tmp = [[-999.0]]
-            return [close, tmp[0][0], down_deep]
+            return [close, tmp[-1][-1], down_deep]
         
         df = df.withColumn("results", add_past_arr(df['code'])).select('code','results.*').toPandas()
         df.set_index('code', inplace=True)
@@ -335,6 +325,6 @@ if __name__ =='__main__':
 
     if args.realtimepredict:
         pred= auto_trade_today.spark_single_day_predict(str(dt.date.today()), save=True) 
-    
+        
         
       

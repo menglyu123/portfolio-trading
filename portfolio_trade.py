@@ -36,7 +36,7 @@ class portfolio_trade(Signal_Model):
         # simulation experiment mode
         else:
             fname = f'./results/simulate_trade_record_{since}.json'
-            # self.create_record_file(fname)
+            self.create_record_file(fname)
             date = datetime.datetime.strptime(since, '%Y-%m-%d').date()
         
         total_ts_count = 0
@@ -79,7 +79,7 @@ class portfolio_trade(Signal_Model):
                 cut_assets = [asset for asset in portfolio_assets if (signal_df.loc[asset]['close']< 0.98*last_record[asset]['buy_price'])]
                 total_ts_count += len(sell_assets)
                 cut_count += len(cut_assets)
-                print('assets to sell:', sell_assets)
+               # print('assets to sell:', sell_assets)
                 if len(sell_assets) > 0:  # SELL
                     for asset in sell_assets:
                         sell_price = cur_close[asset]
@@ -219,7 +219,7 @@ if __name__ == '__main__':
 
     if args.simulate:
         myportfolio = portfolio_trade()
-        myportfolio.trade(since='2023-10-1') 
+        myportfolio.trade(since='2023-10-3') 
 
     if args.auto_trade:
         myportfolio = portfolio_trade(auto_trade=True)
