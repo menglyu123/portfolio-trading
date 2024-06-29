@@ -94,8 +94,7 @@ class Signal_Model():
         # model prediction
         _ = self.load_model()
         pred_val = self.model.predict(test_X)
-        bdf['predict'] = pred_val
-        
+        bdf['predict'] = pred_val        
         close = bdf.close.to_numpy()
         pred = bdf.predict.to_numpy()
     
@@ -219,12 +218,12 @@ class Signal_Model():
             if date == dt.date.today():
                 db_ops.update_today_price(interval='1d')
             df = db_ops.fetch_batch_price_from_db(code, '1d', end=date, limit=self.winlen+100)#60
-                
+            
             if len(df)!=0:
                 start_up_break = False
                 try:
                     _, trend = sm.tsa.filters.hpfilter(df.close, 60)  
-                    bdf, test_X = prepare_data(df, self.winlen, self.future, training=False)
+                    bdf, test_X = prepare_data(df, self.winlen, self.future, training=False)       
                     preds = self.model.predict(test_X)
                     up_trend = (bdf.iloc[-1]['EMA_60']/(bdf.iloc[-10]['EMA_60'])>1) &(bdf.iloc[-1]['EMA_60']/(bdf.iloc[-30]['EMA_60'])>1)
                     down_deep = bdf.iloc[-1]['EMA_60']/bdf.iloc[-1]['close'] >1.1   #the down deeper, the risk lower. the last EMA60 is different if calculate using different-len tables
@@ -246,7 +245,7 @@ class Signal_Model():
                             break
                     fetched_code.append(code)
                     close_list.append(bdf.iloc[-1]['close'])
-                    pred_list.append(preds[-1][0])
+                    pred_list.append(preds[-1][-1])
                     down_deep_list.append(down_deep)
                     start_up_break_list.append(start_up_break)
                     recent_uptrend_start_date_list.append(df.iloc[turning_id]['date'])
@@ -284,7 +283,7 @@ class Signal_Model():
         @udf(schema)
         def add_past_arr(code):
             db_ops = DB_ops(host= self.host, user= self.user, password = self.password)
-            price_df = db_ops.fetch_batch_price_from_db(code, '1d', end= str(date), limit=self.winlen+60)
+            price_df = db_ops.fetch_batch_price_from_db(code, '1d', end= str(date), limit=self.winlen+60) 
             # data transform and preprocessing
             try: 
                 bdf, test_X = prepare_data(price_df, self.winlen, self.future, training=False) 
