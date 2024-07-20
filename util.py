@@ -1,5 +1,6 @@
 print('test')
 import tensorflow as tf 
+print('local')
 from keras import backend as K
 import numpy as np
 from sklearn.cluster import KMeans
