@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-=======
-print('remot')
->>>>>>> refs/remotes/origin/main
 import tensorflow as tf 
 print('local')
 from keras import backend as K
