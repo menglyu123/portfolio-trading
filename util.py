@@ -1,4 +1,3 @@
-print('test')
 import tensorflow as tf 
 print('local')
 from keras import backend as K
